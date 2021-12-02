@@ -1101,7 +1101,7 @@ namespace diff_drive_controller
       command_struct_.ang   = command.angular.z;
       command_struct_.lin   = command.linear.x;
       command_struct_.stamp = ros::Time::now();
-      command_.writeFromNonRT ({ command_struct_, prev_command_struct_});
+      command_.writeFromNonRT ({ command_struct_, prev_command_struct_ });
 
       ROS_DEBUG_STREAM_NAMED(name_,
                              "Added values to command. "

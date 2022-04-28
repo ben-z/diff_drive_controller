@@ -65,6 +65,8 @@ include_directories(
 
 roslint_cpp()
 
+set_directory_properties(PROPERTIES COMPILE_OPTIONS "-std=c++17;")
+
 add_library(${PROJECT_NAME}
   src/diff_drive_controller.cpp
   src/meas_covariance_model.cpp

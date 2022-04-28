@@ -793,7 +793,7 @@ namespace diff_drive_controller
 
     // MOVE ROBOT
     // Retreive current velocity command and time step:
-    Commands curr_cmd = *(command_.readFromRT());
+    auto [curr_cmd, prev_cmd] = *(command_.readFromRT());
     const double dt = (time - curr_cmd.stamp).toSec();
 
     // Brake if cmd_vel has timeout:
@@ -801,6 +801,17 @@ namespace diff_drive_controller
     {
       curr_cmd.lin = 0.0;
       curr_cmd.ang = 0.0;
+    }
+    else if ((curr_cmd.stamp - prev_cmd.stamp).toSec() > cmd_vel_timeout_)
+    {
+      if (prev_cmd.lin != 0.0 || prev_cmd.ang != 0.0)
+      {
+        ROS_ERROR_THROTTLE_NAMED(cmd_vel_timeout_, name_,
+          "Setting cmd_vel to zero. Ignoring current command because frequency is too low.");
+
+        curr_cmd.lin = 0.0;
+        curr_cmd.ang = 0.0;
+      }
     }
 
     // Compute desired (not limited) wheel velocity:
@@ -1085,10 +1096,13 @@ namespace diff_drive_controller
   {
     if (isRunning())
     {
+      prev_command_struct_ = command_struct_;
+
       command_struct_.ang   = command.angular.z;
       command_struct_.lin   = command.linear.x;
       command_struct_.stamp = ros::Time::now();
-      command_.writeFromNonRT (command_struct_);
+      command_.writeFromNonRT ({ command_struct_, prev_command_struct_ });
+
       ROS_DEBUG_STREAM_NAMED(name_,
                              "Added values to command. "
                              << "Ang: "   << command_struct_.ang << ", "

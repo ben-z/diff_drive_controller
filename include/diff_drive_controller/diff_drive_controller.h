@@ -199,14 +199,13 @@ namespace diff_drive_controller
     /// Velocity command related:
     struct Commands
     {
-      double lin;
-      double ang;
-      ros::Time stamp;
-
-      Commands() : lin(0.0), ang(0.0), stamp(0.0) {}
+      double lin{ 0.0 };
+      double ang{ 0.0 };
+      ros::Time stamp{ 0.0 };
     };
-    realtime_tools::RealtimeBuffer<Commands> command_;
+    realtime_tools::RealtimeBuffer<std::pair<Commands, Commands>> command_;
     Commands command_struct_;
+    Commands prev_command_struct_;
     ros::Subscriber sub_command_;
 
     /// Odometry related:

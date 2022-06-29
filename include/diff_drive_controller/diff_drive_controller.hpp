@@ -37,7 +37,7 @@
  * Author: Enrique Fernández
  */
 
-#include <cmath>
+#pragma once
 
 #include <algorithm>
 #include <numeric>
@@ -48,154 +48,18 @@
 
 #include <boost/assign.hpp>
 
-#include <diff_drive_controller/covariance.h>
-#include <diff_drive_controller/diff_drive_controller.h>
+#include "diff_drive_controller/covariance.h"
+#include "diff_drive_controller/diff_drive_controller_utils.h"
 
 #include <std_msgs/Float64.h>
 
-static double euclideanOfVectors(const urdf::Vector3& vec1, const urdf::Vector3& vec2)
-{
-  return std::sqrt(std::pow(vec1.x-vec2.x, 2) +
-                   std::pow(vec1.y-vec2.y, 2) +
-                   std::pow(vec1.z-vec2.z, 2));
-}
-
-/*
- * \brief Check if the link is modeled as a cylinder
- * \param link Link
- * \return true if the link is modeled as a Cylinder; false otherwise
- */
-static bool isCylinder(const urdf::LinkConstSharedPtr& link)
-{
-  if (!link)
-  {
-    ROS_ERROR("Link == NULL.");
-    return false;
-  }
-
-  if (!link->collision)
-  {
-    ROS_ERROR_STREAM("Link " << link->name <<
-        " does not have collision description. "
-        "Add collision description for link to urdf.");
-    return false;
-  }
-
-  if (!link->collision->geometry)
-  {
-    ROS_ERROR_STREAM("Link " << link->name <<
-        " does not have collision geometry description. "
-        "Add collision geometry description for link to urdf.");
-    return false;
-  }
-
-  if (link->collision->geometry->type != urdf::Geometry::CYLINDER)
-  {
-    ROS_ERROR_STREAM("Link " << link->name <<
-        " does not have cylinder geometry");
-    return false;
-  }
-
-  return true;
-}
-
-/*
- * \brief Get the wheel radius
- * \param [in]  wheel_link   Wheel link
- * \param [out] wheel_radius Wheel radius [m]
- * \return true if the wheel radius was found; false otherwise
- */
-static bool getWheelRadius(
-    const urdf::LinkConstSharedPtr& wheel_link,
-    double& wheel_radius)
-{
-  if (!isCylinder(wheel_link))
-  {
-    ROS_ERROR_STREAM("Wheel link " << wheel_link->name <<
-        " is NOT modeled as a cylinder!");
-    return false;
-  }
-
-  wheel_radius = (static_cast<urdf::Cylinder*>(
-        wheel_link->collision->geometry.get()))->radius;
-  return true;
-}
-
-
 namespace diff_drive_controller
 {
-  static void resize(trajectory_msgs::JointTrajectoryPoint& msg,
-      const size_t size)
-  {
-    msg.positions.resize(size);
-    msg.velocities.resize(size);
-    msg.accelerations.resize(size);
-    msg.effort.resize(size);
-  }
+  template <class... Interfaces>
+  const DiffDriveControllerConfig DiffDriveControllerImpl<Interfaces...>::config_default_ = DiffDriveControllerConfig::__getDefault__();
 
-  static void resize(DiffDriveControllerState& msg, const size_t size)
-  {
-    msg.joint_names.resize(size);
-
-    resize(msg.desired         , size);
-    resize(msg.actual          , size);
-    resize(msg.limited         , size);
-    resize(msg.error           , size);
-    resize(msg.actual_estimated, size);
-    resize(msg.error_estimated , size);
-
-    resize(msg.actual_side_average          , 2);
-    resize(msg.error_side_average           , 2);
-    resize(msg.actual_estimated_side_average, 2);
-    resize(msg.error_estimated_side_average , 2);
-  }
-
-  template <typename T>
-  static void error(
-      std::vector<T>& err,
-      const std::vector<T>& desired,
-      const std::vector<T>& actual)
-  {
-    ROS_ASSERT(err.size() == desired.size());
-    ROS_ASSERT(err.size() == actual.size());
-
-    // Compute: error = desired - actual
-    std::transform(desired.begin(), desired.end(), actual.begin(),
-        err.begin(), std::minus<T>());
-  }
-
-  static void error(
-      trajectory_msgs::JointTrajectoryPoint& err,
-      const trajectory_msgs::JointTrajectoryPoint& desired,
-      const trajectory_msgs::JointTrajectoryPoint& actual)
-  {
-    error(err.positions    , desired.positions    , actual.positions);
-    error(err.velocities   , desired.velocities   , actual.velocities);
-    error(err.accelerations, desired.accelerations, actual.accelerations);
-    error(err.effort       , desired.effort       , actual.effort);
-
-    err.time_from_start = actual.time_from_start;
-  }
-
-  static void error(DiffDriveControllerState& msg)
-  {
-    error(msg.error          , msg.desired, msg.actual);
-    error(msg.error_estimated, msg.desired, msg.actual_estimated);
-
-    error(msg.error_side_average,
-        msg.desired, msg.actual_side_average);
-    error(msg.error_estimated_side_average,
-        msg.desired, msg.actual_estimated_side_average);
-
-    msg.control_period_error =
-        msg.control_period_desired - msg.control_period_actual;
-    msg.control_period_error_estimated =
-        msg.control_period_desired - msg.control_period_actual_estimated;
-  }
-
-  const DiffDriveControllerConfig DiffDriveController::config_default_ = DiffDriveControllerConfig::__getDefault__();
-
-  DiffDriveController::DiffDriveController()
+  template <class... Interfaces>
+  DiffDriveControllerImpl<Interfaces...>::DiffDriveControllerImpl()
     : open_loop_(false)
     , pose_from_joint_position_(config_default_.pose_from_joint_position)
     , twist_from_joint_position_(config_default_.twist_from_joint_position)
@@ -225,11 +89,8 @@ namespace diff_drive_controller
   {
   }
 
-  DiffDriveController::~DiffDriveController()
-  {
-  }
-
-  bool DiffDriveController::init(hardware_interface::VelocityJointInterface* hw,
+  template <class... Interfaces>
+  bool DiffDriveControllerImpl<Interfaces...>::init(hardware_interface::RobotHW* hw,
             ros::NodeHandle& root_nh,
             ros::NodeHandle &controller_nh)
   {
@@ -501,7 +362,7 @@ namespace diff_drive_controller
     cfg_server_.reset(new ReconfigureServer(controller_nh));
     cfg_server_->updateConfig(config);
     cfg_server_->setCallback(
-        boost::bind(&DiffDriveController::reconfigureCallback, this, _1, _2));
+        boost::bind(&DiffDriveControllerImpl<Interfaces...>::reconfigureCallback, this, _1, _2));
 
     // Limited velocity command:
     cmd_vel_limited_pub_.reset(new realtime_tools::RealtimePublisher<geometry_msgs::TwistStamped>(controller_nh, "cmd_vel_limited", 100));
@@ -560,11 +421,11 @@ namespace diff_drive_controller
       ROS_INFO_STREAM_NAMED(name_,
                             "Adding left wheel with joint name: " << left_wheel_names[i]
                             << " and right wheel with joint name: " << right_wheel_names[i]);
-      left_wheel_joints_[i] = hw->getHandle(left_wheel_names[i]);  // throws on failure
-      right_wheel_joints_[i] = hw->getHandle(right_wheel_names[i]);  // throws on failure
+      left_wheel_joints_[i] = hw->get<hardware_interface::VelocityJointInterface>()->getHandle(left_wheel_names[i]);  // throws on failure
+      right_wheel_joints_[i] = hw->get<hardware_interface::VelocityJointInterface>()->getHandle(right_wheel_names[i]);  // throws on failure
     }
 
-    sub_command_ = controller_nh.subscribe("cmd_vel", 1, &DiffDriveController::cmdVelCallback, this);
+    sub_command_ = controller_nh.subscribe("cmd_vel", 1, &DiffDriveControllerImpl<Interfaces...>::cmdVelCallback, this);
 
     // Publishers for effective wheel radius and separation
     wheel_radius_pub_ = controller_nh.advertise<std_msgs::Float64>("wheel_radius", 1, true);
@@ -574,7 +435,8 @@ namespace diff_drive_controller
     return true;
   }
 
-  void DiffDriveController::update(const ros::Time& time, const ros::Duration& period)
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::update(const ros::Time& time, const ros::Duration& period)
   {
     // Start/Resume CPU timer to measure the control time:
     if (publish_state_)
@@ -1066,7 +928,8 @@ namespace diff_drive_controller
     time_previous_ = time;
   }
 
-  void DiffDriveController::starting(const ros::Time& time)
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::starting(const ros::Time& time)
   {
     brake();
 
@@ -1076,17 +939,20 @@ namespace diff_drive_controller
     odometry_.init();
   }
 
-  void DiffDriveController::stopping(const ros::Time& /*time*/)
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::stopping(const ros::Time& /*time*/)
   {
     brake();
   }
 
-  void DiffDriveController::setWheelSpeedLimiter(WheelSpeedLimiter wheel_speed_limiter)
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::setWheelSpeedLimiter(WheelSpeedLimiter wheel_speed_limiter)
   {
     wheel_speed_limiter_ = wheel_speed_limiter;
   }
 
-  void DiffDriveController::wheelSpeedLimiter(double& left_command, double& right_command,
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::wheelSpeedLimiter(double& left_command, double& right_command,
                                               double left_desired, double right_desired)
   {
     if (wheel_speed_limiter_)
@@ -1095,7 +961,8 @@ namespace diff_drive_controller
     }
   }
 
-  void DiffDriveController::brake()
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::brake()
   {
     const double vel = 0.0;
     for (size_t i = 0; i < wheel_joints_size_; ++i)
@@ -1105,9 +972,10 @@ namespace diff_drive_controller
     }
   }
 
-  void DiffDriveController::cmdVelCallback(const geometry_msgs::Twist& command)
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::cmdVelCallback(const geometry_msgs::Twist& command)
   {
-    if (isRunning())
+    if (this->isRunning())
     {
       prev_command_struct_ = command_struct_;
 
@@ -1128,7 +996,8 @@ namespace diff_drive_controller
     }
   }
 
-  void DiffDriveController::reconfigureCallback(
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::reconfigureCallback(
       DiffDriveControllerConfig& config, uint32_t level)
   {
     dynamic_params_struct_.pose_from_joint_position = config.pose_from_joint_position;
@@ -1180,7 +1049,8 @@ namespace diff_drive_controller
     specs_updated_ = true;
   }
 
-  bool DiffDriveController::getWheelNames(ros::NodeHandle& controller_nh,
+  template <class... Interfaces>
+  bool DiffDriveControllerImpl<Interfaces...>::getWheelNames(ros::NodeHandle& controller_nh,
                               const std::string& wheel_param,
                               std::vector<std::string>& wheel_names)
   {
@@ -1233,7 +1103,8 @@ namespace diff_drive_controller
       return true;
   }
 
-  bool DiffDriveController::setOdomParamsFromUrdf(ros::NodeHandle& root_nh,
+  template <class... Interfaces>
+  bool DiffDriveControllerImpl<Interfaces...>::setOdomParamsFromUrdf(ros::NodeHandle& root_nh,
                              const std::string& left_wheel_name,
                              const std::string& right_wheel_name,
                              bool lookup_wheel_separation,
@@ -1306,7 +1177,8 @@ namespace diff_drive_controller
     return true;
   }
 
-  void DiffDriveController::setOdomPubFields(ros::NodeHandle& root_nh, ros::NodeHandle& controller_nh)
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::setOdomPubFields(ros::NodeHandle& root_nh, ros::NodeHandle& controller_nh)
   {
     /// Set odometry initial pose covariance
     XmlRpc::XmlRpcValue pose_cov_list;
@@ -1366,7 +1238,8 @@ namespace diff_drive_controller
     tf_odom_pub_->msg_.transforms[0].header.frame_id = "odom";
   }
 
-  void DiffDriveController::publishVehicleSpecs()
+  template <class... Interfaces>
+  void DiffDriveControllerImpl<Interfaces...>::publishVehicleSpecs()
   {
     std_msgs::Float64 wheel_radius_msg;
     std_msgs::Float64 wheel_separation_msg;

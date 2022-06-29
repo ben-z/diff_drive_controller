@@ -68,8 +68,8 @@ roslint_cpp()
 set_directory_properties(PROPERTIES COMPILE_OPTIONS "-std=c++17;")
 
 add_library(${PROJECT_NAME}
-  src/diff_drive_controller.cpp
   src/meas_covariance_model.cpp
+  src/diff_drive_controller_utils.cpp
   src/linear_meas_covariance_model.cpp
   src/quadratic_meas_covariance_model.cpp
   src/integrate_function.cpp
@@ -90,7 +90,9 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_plugin
 
 install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-  FILES_MATCHING PATTERN "*.h")
+  FILES_MATCHING 
+    PATTERN "*.h" 
+    PATTERN "*.hpp")
 
 install(FILES diff_drive_controller_plugins.xml
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})

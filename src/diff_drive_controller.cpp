@@ -51,6 +51,8 @@
 #include <diff_drive_controller/covariance.h>
 #include <diff_drive_controller/diff_drive_controller.h>
 
+#include <std_msgs/Float64.h>
+
 static double euclideanOfVectors(const urdf::Vector3& vec1, const urdf::Vector3& vec2)
 {
   return std::sqrt(std::pow(vec1.x-vec2.x, 2) +
@@ -564,6 +566,11 @@ namespace diff_drive_controller
 
     sub_command_ = controller_nh.subscribe("cmd_vel", 1, &DiffDriveController::cmdVelCallback, this);
 
+    // Publishers for effective wheel radius and separation
+    wheel_radius_pub_ = controller_nh.advertise<std_msgs::Float64>("wheel_radius", 1, true);
+    wheel_separation_pub_ = controller_nh.advertise<std_msgs::Float64>("wheel_separation", 1, true);
+    publishVehicleSpecs();
+
     return true;
   }
 
@@ -615,6 +622,12 @@ namespace diff_drive_controller
     const double ws  = wheel_separation_multiplier_   * wheel_separation_;
     const double wrl = left_wheel_radius_multiplier_  * wheel_radius_;
     const double wrr = right_wheel_radius_multiplier_ * wheel_radius_;
+
+    if (specs_updated_)
+    {
+      publishVehicleSpecs();
+      specs_updated_ = false;
+    }
 
     // Set the odometry parameters:
     odometry_.setWheelParams(ws, wrl, wrr);
@@ -1163,6 +1176,8 @@ namespace diff_drive_controller
     ROS_DEBUG_STREAM_NAMED(name_,
                           "Reconfigured Control params. "
                           << "desired/expected control frequency: " << dynamic_params_struct_.control_frequency_desired << "Hz");
+
+    specs_updated_ = true;
   }
 
   bool DiffDriveController::getWheelNames(ros::NodeHandle& controller_nh,
@@ -1351,4 +1366,21 @@ namespace diff_drive_controller
     tf_odom_pub_->msg_.transforms[0].header.frame_id = "odom";
   }
 
+  void DiffDriveController::publishVehicleSpecs()
+  {
+    std_msgs::Float64 wheel_radius_msg;
+    std_msgs::Float64 wheel_separation_msg;
+
+    double wheel_radius_multiplier = 0.5 * (left_wheel_radius_multiplier_ + right_wheel_radius_multiplier_);
+    if (left_wheel_radius_multiplier_ != right_wheel_radius_multiplier_)
+    {
+      ROS_WARN("DiffDriveController: Radius multiplier for left and right wheels are different.");
+    }
+
+    wheel_radius_msg.data = wheel_radius_ * wheel_radius_multiplier;
+    wheel_separation_msg.data = wheel_separation_ * wheel_separation_multiplier_;
+
+    wheel_radius_pub_.publish(wheel_radius_msg);
+    wheel_separation_pub_.publish(wheel_separation_msg);
+  }
 }  // namespace diff_drive_controller

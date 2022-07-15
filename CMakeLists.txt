@@ -103,7 +103,8 @@ if (CATKIN_ENABLE_TESTING)
       controller_manager
       control_toolbox
       tf2
-      tf2_ros)
+      tf2_ros
+      angles)
 
   include_directories(
     include

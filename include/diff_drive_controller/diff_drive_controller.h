@@ -176,6 +176,12 @@ namespace diff_drive_controller
     std::vector<double> right_velocities_;
 
   private:
+    /**
+     * \brief Publishes key specs of the vehicle onto a latched topic.
+     */
+    void publishVehicleSpecs();
+    bool specs_updated_{ false };
+
     std::string name_;
 
     /// Odometry related:
@@ -317,6 +323,10 @@ namespace diff_drive_controller
     Commands last0_cmd_;
     SpeedLimiter limiter_lin_;
     SpeedLimiter limiter_ang_;
+
+    /// Publishers for wheel radius and separation
+    ros::Publisher wheel_radius_pub_;
+    ros::Publisher wheel_separation_pub_;
 
     WheelSpeedLimiter wheel_speed_limiter_;
 

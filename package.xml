@@ -45,6 +45,7 @@
   <test_depend>tf2_ros</test_depend>
   <test_depend>xacro</test_depend>
   <test_depend>rqt_plot</test_depend>
+  <test_depend>angles</test_depend>
 
   <export>
     <controller_interface plugin="${prefix}/diff_drive_controller_plugins.xml"/>

@@ -49,6 +49,7 @@ catkin_package(
     realtime_tools
     std_msgs
     tf2_msgs
+    tf2_geometry_msgs
     trajectory_msgs
     urdf
   DEPENDS
@@ -90,8 +91,8 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_plugin
 
 install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-  FILES_MATCHING 
-    PATTERN "*.h" 
+  FILES_MATCHING
+    PATTERN "*.h"
     PATTERN "*.hpp")
 
 install(FILES diff_drive_controller_plugins.xml

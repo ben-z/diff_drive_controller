@@ -39,7 +39,7 @@
 #ifndef DIFF_DRIVE_CONTROLLER_H
 #define DIFF_DRIVE_CONTROLLER_H
 
-#include <controller_interface/controller.h>
+#include <controller_interface/multi_interface_controller.h>
 #include <hardware_interface/joint_command_interface.h>
 
 #include <nav_msgs/Odometry.h>
@@ -64,8 +64,10 @@
 
 namespace diff_drive_controller
 {
-
   /**
+   * This class is the original DiffDriveController modified to accept multiple interfaces.
+   * Custom controllers can extend this class to allow the use of custom interfaces.
+   *
    * This class makes some assumptions on the model of the robot:
    *  - the rotation axes of wheels are collinear
    *  - the wheels are identical in radius
@@ -76,23 +78,24 @@ namespace diff_drive_controller
    *  - a wheel joint frame center's vertical projection on the floor must lie
    *  within the contact patch
    */
-  class DiffDriveController
-      : public controller_interface::Controller<hardware_interface::VelocityJointInterface>
+  template <class... Interfaces>
+  class DiffDriveControllerImpl
+      : public controller_interface::MultiInterfaceController<Interfaces...>
   {
   public:
     typedef boost::function<void (double&, double&, double, double)> WheelSpeedLimiter;
 
-    DiffDriveController();
+    DiffDriveControllerImpl();
 
-    virtual ~DiffDriveController();
+    virtual ~DiffDriveControllerImpl() = default;
 
     /**
      * \brief Initialize controller
-     * \param hw            Velocity joint interface for the wheels
+     * \param hw            Collection of robot interfaces
      * \param root_nh       Node handle at root namespace
      * \param controller_nh Node handle inside the controller namespace
      */
-    bool init(hardware_interface::VelocityJointInterface* hw,
+    bool init(hardware_interface::RobotHW* hw,
               ros::NodeHandle& root_nh,
               ros::NodeHandle &controller_nh);
 
@@ -401,6 +404,16 @@ namespace diff_drive_controller
     bool limit_accel_before_wheel_speed_limiter_;
   };
 
+  /**
+   * DiffDriveController with a single VelocityJointInterface to preserve original behavior.
+   */
+  class DiffDriveController
+      : public DiffDriveControllerImpl<hardware_interface::VelocityJointInterface>
+  {
+  };
+
 }  // namespace diff_drive_controller
+
+#include <diff_drive_controller/diff_drive_controller.hpp>
 
 #endif // DIFF_DRIVE_CONTROLLER_H

@@ -159,6 +159,8 @@ namespace diff_drive_controller{
     , enable_odom_tf_(true)
     , wheel_joints_size_(0)
     , publish_cmd_(false)
+    , filter_cmd_vel_out_(true)
+    , publish_cmd_accel_(false)
     , publish_wheel_joint_controller_state_(false)
   {
   }
@@ -273,7 +275,23 @@ namespace diff_drive_controller{
     controller_nh.param("angular/z/min_jerk"               , limiter_ang_.min_jerk               , -limiter_ang_.max_jerk              );
 
     // Publish limited velocity:
+    double publish_cmd_rate_, cmd_vel_filter_cutoff_freq_;
     controller_nh.param("publish_cmd", publish_cmd_, publish_cmd_);
+    controller_nh.param("publish_cmd_rate", publish_cmd_rate_, 1000.0);
+    controller_nh.param("filter_cmd_vel_out", filter_cmd_vel_out_, filter_cmd_vel_out_);
+    controller_nh.param("cmd_vel_filter_cutoff_freq", cmd_vel_filter_cutoff_freq_, 20.0);
+    publish_cmd_period_ = ros::Duration(1.0 / publish_cmd_rate_);
+    cmd_vel_lin_filter_.reset(cmd_vel_filter_cutoff_freq_, 1000.0);
+    cmd_vel_ang_filter_.reset(cmd_vel_filter_cutoff_freq_, 1000.0);
+    
+    // Publish acceleration command:
+    double publish_cmd_accel_rate_, cmd_accel_filter_cutoff_freq_;
+    controller_nh.param("publish_cmd_accel", publish_cmd_accel_, publish_cmd_accel_);
+    controller_nh.param("publish_cmd_accel_rate", publish_cmd_accel_rate_, 1000.0);
+    controller_nh.param("cmd_accel_filter_cutoff_freq", cmd_accel_filter_cutoff_freq_, 5.0);
+    publish_cmd_accel_period_ = ros::Duration(1.0 / publish_cmd_accel_rate_);
+    cmd_accel_lin_filter_.reset(cmd_accel_filter_cutoff_freq_, 1000.0);
+    cmd_accel_ang_filter_.reset(cmd_accel_filter_cutoff_freq_, 1000.0);
 
     // Publish wheel data:
     controller_nh.param("publish_wheel_joint_controller_state", publish_wheel_joint_controller_state_, publish_wheel_joint_controller_state_);
@@ -305,6 +323,10 @@ namespace diff_drive_controller{
     if (publish_cmd_)
     {
       cmd_vel_pub_.reset(new realtime_tools::RealtimePublisher<geometry_msgs::TwistStamped>(controller_nh, "cmd_vel_out", 100));
+    }
+
+    if (publish_cmd_accel_) {
+      cmd_accel_pub_.reset(new realtime_tools::RealtimePublisher<geometry_msgs::AccelStamped>(controller_nh, "cmd_accel_out", 100));
     }
 
     // Wheel joint controller state:
@@ -364,6 +386,10 @@ namespace diff_drive_controller{
     dynamic_params.publish_rate = publish_rate;
     dynamic_params.enable_odom_tf = enable_odom_tf_;
 
+    dynamic_params.filter_cmd_vel_out = filter_cmd_vel_out_;
+    dynamic_params.cmd_vel_filter_cutoff_freq = cmd_vel_filter_cutoff_freq_;
+    dynamic_params.cmd_accel_filter_cutoff_freq = cmd_accel_filter_cutoff_freq_;
+
     dynamic_params_.writeFromNonRT(dynamic_params);
 
     // Initialize dynamic_reconfigure server
@@ -374,6 +400,10 @@ namespace diff_drive_controller{
 
     config.publish_rate = publish_rate;
     config.enable_odom_tf = enable_odom_tf_;
+
+    config.filter_cmd_vel_out = filter_cmd_vel_out_;
+    config.cmd_vel_filter_cutoff_freq = cmd_vel_filter_cutoff_freq_;
+    config.cmd_accel_filter_cutoff_freq = cmd_accel_filter_cutoff_freq_;
 
     dyn_reconf_server_ = std::make_shared<ReconfigureServer>(dyn_reconf_server_mutex_, controller_nh);
 
@@ -476,17 +506,40 @@ namespace diff_drive_controller{
     limiter_lin_.limit(curr_cmd.lin, last0_cmd_.lin, last1_cmd_.lin, cmd_dt);
     limiter_ang_.limit(curr_cmd.ang, last0_cmd_.ang, last1_cmd_.ang, cmd_dt);
 
+    // Publish limited velocity:
+    if (publish_cmd_) {
+      double filtered_vel_lin = filter_cmd_vel_out_ ? cmd_vel_lin_filter_.filter(curr_cmd.lin): curr_cmd.lin;
+      double filtered_vel_ang = filter_cmd_vel_out_ ? cmd_vel_ang_filter_.filter(curr_cmd.ang): curr_cmd.ang;
+
+      if ((last_cmd_publish_time_ + publish_cmd_period_ < time) && cmd_vel_pub_ && cmd_vel_pub_->trylock())
+      {
+        last_cmd_publish_time_ += publish_cmd_period_;
+
+        cmd_vel_pub_->msg_.header.stamp = time;
+        cmd_vel_pub_->msg_.twist.linear.x = filtered_vel_lin;
+        cmd_vel_pub_->msg_.twist.angular.z = filtered_vel_ang;
+        cmd_vel_pub_->unlockAndPublish();
+      }
+    }
+
+    // Publish acceleration
+    if (publish_cmd_accel_) {
+      double filtered_accel_lin = cmd_accel_lin_filter_.filter((curr_cmd.lin - last0_cmd_.lin) / cmd_dt);
+      double filtered_accel_ang = cmd_accel_ang_filter_.filter((curr_cmd.ang - last0_cmd_.ang) / cmd_dt);
+
+      if ((last_cmd_accel_publish_time_ + publish_cmd_accel_period_ < time) && cmd_accel_pub_ && cmd_accel_pub_->trylock())
+      {
+        last_cmd_accel_publish_time_ += publish_cmd_accel_period_;
+
+        cmd_accel_pub_->msg_.header.stamp = time;
+        cmd_accel_pub_->msg_.accel.linear.x = filtered_accel_lin;
+        cmd_accel_pub_->msg_.accel.angular.z = filtered_accel_ang;
+        cmd_accel_pub_->unlockAndPublish();
+      }
+  }
+
     last1_cmd_ = last0_cmd_;
     last0_cmd_ = curr_cmd;
-
-    // Publish limited velocity:
-    if (publish_cmd_ && cmd_vel_pub_ && cmd_vel_pub_->trylock())
-    {
-      cmd_vel_pub_->msg_.header.stamp = time;
-      cmd_vel_pub_->msg_.twist.linear.x = curr_cmd.lin;
-      cmd_vel_pub_->msg_.twist.angular.z = curr_cmd.ang;
-      cmd_vel_pub_->unlockAndPublish();
-    }
 
     // Compute wheels velocities:
     const double vel_left  = (curr_cmd.lin - curr_cmd.ang * ws / 2.0)/lwr;
@@ -509,6 +562,8 @@ namespace diff_drive_controller{
 
     // Register starting time used to keep fixed rate
     last_state_publish_time_ = time;
+    last_cmd_publish_time_ = time;
+    last_cmd_accel_publish_time_ = time;
     time_previous_ = time;
 
     odometry_.init(time);
@@ -741,8 +796,11 @@ namespace diff_drive_controller{
     dynamic_params.wheel_separation_multiplier   = config.wheel_separation_multiplier;
 
     dynamic_params.publish_rate = config.publish_rate;
-
     dynamic_params.enable_odom_tf = config.enable_odom_tf;
+
+    dynamic_params.filter_cmd_vel_out = config.filter_cmd_vel_out;
+    dynamic_params.cmd_vel_filter_cutoff_freq = config.cmd_vel_filter_cutoff_freq;
+    dynamic_params.cmd_accel_filter_cutoff_freq = config.cmd_accel_filter_cutoff_freq;
 
     dynamic_params_.writeFromNonRT(dynamic_params);
 
@@ -760,6 +818,19 @@ namespace diff_drive_controller{
 
     publish_period_ = ros::Duration(1.0 / dynamic_params.publish_rate);
     enable_odom_tf_ = dynamic_params.enable_odom_tf;
+
+    filter_cmd_vel_out_ = dynamic_params.filter_cmd_vel_out;
+
+    if (dynamic_params.cmd_vel_filter_cutoff_freq != cmd_vel_lin_filter_.cutoff_frequency) {
+      ROS_INFO_STREAM_NAMED(name_, "Updating cmd_vel filter cutoff frequency to " << dynamic_params.cmd_vel_filter_cutoff_freq);
+      cmd_vel_lin_filter_.reset(dynamic_params.cmd_vel_filter_cutoff_freq, cmd_vel_lin_filter_.sampling_frequency);
+      cmd_vel_ang_filter_.reset(dynamic_params.cmd_vel_filter_cutoff_freq, cmd_vel_ang_filter_.sampling_frequency);
+    }
+    if (dynamic_params.cmd_accel_filter_cutoff_freq != cmd_accel_lin_filter_.cutoff_frequency) {
+      ROS_INFO_STREAM_NAMED(name_, "Updating cmd_accel filter cutoff frequency to " << dynamic_params.cmd_accel_filter_cutoff_freq);
+      cmd_accel_lin_filter_.reset(dynamic_params.cmd_accel_filter_cutoff_freq, cmd_accel_lin_filter_.sampling_frequency);
+      cmd_accel_ang_filter_.reset(dynamic_params.cmd_accel_filter_cutoff_freq, cmd_accel_ang_filter_.sampling_frequency);
+    }
   }
 
   void DiffDriveController::publishWheelData(const ros::Time& time, const ros::Duration& period, Commands& curr_cmd,
@@ -795,12 +866,12 @@ namespace diff_drive_controller{
         // Desired
         controller_state_pub_->msg_.desired.positions[i]    += vel_left_desired * cmd_dt;
         controller_state_pub_->msg_.desired.velocities[i]    = vel_left_desired;
-        controller_state_pub_->msg_.desired.accelerations[i] = (vel_left_desired - vel_left_desired_previous_) * cmd_dt;
+        controller_state_pub_->msg_.desired.accelerations[i] = (vel_left_desired - vel_left_desired_previous_) / cmd_dt;
         controller_state_pub_->msg_.desired.effort[i]        = std::numeric_limits<double>::quiet_NaN();
 
         controller_state_pub_->msg_.desired.positions[i + wheel_joints_size_]    += vel_right_desired * cmd_dt;
         controller_state_pub_->msg_.desired.velocities[i + wheel_joints_size_]    = vel_right_desired;
-        controller_state_pub_->msg_.desired.accelerations[i + wheel_joints_size_] = (vel_right_desired - vel_right_desired_previous_) * cmd_dt;
+        controller_state_pub_->msg_.desired.accelerations[i + wheel_joints_size_] = (vel_right_desired - vel_right_desired_previous_) / cmd_dt;
         controller_state_pub_->msg_.desired.effort[i+ wheel_joints_size_]         = std::numeric_limits<double>::quiet_NaN();
 
         // Error

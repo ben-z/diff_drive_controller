@@ -44,8 +44,11 @@
 #include <diff_drive_controller/DiffDriveControllerConfig.h>
 #include <diff_drive_controller/odometry.h>
 #include <diff_drive_controller/speed_limiter.h>
+#include <diff_drive_controller/moving_average.h>
+#include <diff_drive_controller/butterworth_filter_2nd_order.h>
 #include <dynamic_reconfigure/server.h>
 #include <geometry_msgs/TwistStamped.h>
+#include <geometry_msgs/AccelStamped.h>
 #include <hardware_interface/joint_command_interface.h>
 #include <memory>
 #include <nav_msgs/Odometry.h>
@@ -137,6 +140,7 @@ namespace diff_drive_controller{
 
     /// Publish executed commands
     std::shared_ptr<realtime_tools::RealtimePublisher<geometry_msgs::TwistStamped> > cmd_vel_pub_;
+    std::shared_ptr<realtime_tools::RealtimePublisher<geometry_msgs::AccelStamped> > cmd_accel_pub_;
 
     /// Odometry related:
     std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::Odometry> > odom_pub_;
@@ -183,6 +187,18 @@ namespace diff_drive_controller{
 
     /// Publish limited velocity:
     bool publish_cmd_;
+    ros::Duration publish_cmd_period_;
+    ros::Time last_cmd_publish_time_;
+    bool filter_cmd_vel_out_;
+    ButterworthFilter2ndOrder cmd_vel_lin_filter_;
+    ButterworthFilter2ndOrder cmd_vel_ang_filter_;
+    
+    /// Publish acceleration:
+    bool publish_cmd_accel_;
+    ros::Duration publish_cmd_accel_period_;
+    ros::Time last_cmd_accel_publish_time_;
+    ButterworthFilter2ndOrder cmd_accel_lin_filter_;
+    ButterworthFilter2ndOrder cmd_accel_ang_filter_;
 
     /// Publish wheel data:
     bool publish_wheel_joint_controller_state_;
@@ -202,6 +218,10 @@ namespace diff_drive_controller{
       double publish_rate;
       bool enable_odom_tf;
 
+      bool filter_cmd_vel_out;
+      double cmd_vel_filter_cutoff_freq;
+      double cmd_accel_filter_cutoff_freq;
+
       DynamicParams()
         : left_wheel_radius_multiplier(1.0)
         , right_wheel_radius_multiplier(1.0)
@@ -209,6 +229,9 @@ namespace diff_drive_controller{
         , publish_cmd(false)
         , publish_rate(50)
         , enable_odom_tf(true)
+        , filter_cmd_vel_out(true)
+        , cmd_vel_filter_cutoff_freq(20.0)
+        , cmd_accel_filter_cutoff_freq(5.0)
       {}
 
       friend std::ostream& operator<<(std::ostream& os, const DynamicParams& params)
@@ -223,7 +246,10 @@ namespace diff_drive_controller{
            << "\tPublication parameters:\n"
            << "\t\tPublish executed velocity command: " << (params.publish_cmd?"enabled":"disabled") << "\n"
            << "\t\tPublication rate: " << params.publish_rate                 << "\n"
-           << "\t\tPublish frame odom on tf: " << (params.enable_odom_tf?"enabled":"disabled");
+           << "\t\tPublish frame odom on tf: " << (params.enable_odom_tf?"enabled":"disabled") << "\n"
+           << "\t\tFilter cmd_vel output: " << (params.filter_cmd_vel_out?"enabled":"disabled") << "\n"
+           << "\t\tcmd_vel filter cutoff frequency: " << params.cmd_vel_filter_cutoff_freq << "\n"
+           << "\t\tcmd_accel filter cutoff frequency: " << params.cmd_accel_filter_cutoff_freq << "\n";
 
         return os;
       }
